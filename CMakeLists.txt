@@ -5,6 +5,11 @@ project(illviewer VERSION 1.0.0)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Work around a known fmt-library/Clang incompatibility: newer Clang versions
+# reject fmt's compile-time FMT_STRING() checks as not-constant-expressions.
+# This disables that one check; it does not affect how our own code behaves.
+add_compile_definitions(FMT_USE_CONSTEVAL=0)
+
 add_library(${PROJECT_NAME} SHARED
     main.cpp
 )
