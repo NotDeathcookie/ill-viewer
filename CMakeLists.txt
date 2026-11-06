@@ -8,7 +8,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Work around a known fmt-library/Clang incompatibility: newer Clang versions
 # reject fmt's compile-time FMT_STRING() checks as not-constant-expressions.
 # This disables that one check; it does not affect how our own code behaves.
-add_compile_definitions(FMT_USE_CONSTEVAL=0)
+# (fmt 10.2.1, which Geode pins, only honors FMT_CONSTEVAL, set empty here.)
+add_compile_definitions(FMT_CONSTEVAL=)
 
 add_library(${PROJECT_NAME} SHARED
     main.cpp
