@@ -1,5 +1,5 @@
 {
-    "geode": "3.8.0",
+    "geode": "5.11.2",
     "gd": {
         "win": "*",
         "mac": "*",
@@ -7,7 +7,7 @@
     },
     "id": "silent.ill-viewer",
     "name": "ILL Viewer",
-    "version": "v1.0.0",
+    "version": "v1.2.0",
     "developer": "silent",
     "description": "Custom in-game viewer for the Geometry Dash Impossible Level List (ILL)."
 }
