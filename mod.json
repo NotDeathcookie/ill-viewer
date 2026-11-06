@@ -1,5 +1,10 @@
 {
     "geode": "3.8.0",
+    "gd": {
+        "win": "*",
+        "mac": "*",
+        "android": "*"
+    },
     "id": "silent.ill-viewer",
     "name": "ILL Viewer",
     "version": "v1.0.0",
