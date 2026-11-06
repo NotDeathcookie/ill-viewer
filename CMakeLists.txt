@@ -9,6 +9,8 @@ add_library(${PROJECT_NAME} SHARED
     main.cpp
 )
 
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+
 if (NOT DEFINED ENV{GEODE_SDK})
     message(FATAL_ERROR "Unable to find Geode SDK! Please define GEODE_SDK environment variable to point to Geode installation")
 else()
