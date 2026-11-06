@@ -1,0 +1,6 @@
+build/
+.vs/
+.vscode/
+*.geode
+CMakeCache.txt
+CMakeFiles/
