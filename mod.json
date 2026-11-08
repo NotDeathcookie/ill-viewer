@@ -9,5 +9,10 @@
     "name": "ILL Viewer",
     "version": "v1.2.0",
     "developer": "silent",
-    "description": "Custom in-game viewer for the Geometry Dash Impossible Level List (ILL)."
+    "description": "Custom in-game viewer for the Geometry Dash Impossible Level List (ILL).",
+    "resources": {
+        "files": [
+            "resources/ill_data.json"
+        ]
+    }
 }
