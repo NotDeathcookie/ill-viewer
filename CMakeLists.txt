@@ -28,5 +28,4 @@ add_subdirectory($ENV{GEODE_SDK} ${CMAKE_CURRENT_BINARY_DIR}/geode)
 setup_geode_mod(${PROJECT_NAME}
     RESOURCES
         resources/ill_icon.png
-        resources/ill_data.json
 )
