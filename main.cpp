@@ -1,13 +1,10 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/LevelSearchLayer.hpp>
 #include <Geode/modify/LevelBrowserLayer.hpp>
-#include <Geode/utils/web.hpp>
-#include <Geode/utils/async.hpp>
 #include <vector>
 #include <string>
 #include <sstream>
 #include <algorithm>
-#include <filesystem>
 
 using namespace geode::prelude;
 
@@ -15,20 +12,6 @@ using namespace geode::prelude;
 inline std::vector<int> g_illLevels;
 inline bool g_isILLSearch = false;
 inline int g_illPage = 0; // Tracks our custom page internally (0-indexed)
-inline bool g_illDataLoading = false;
-inline bool g_illDataLoadFailed = false;
-
-// Live ILL API (replaces the old bundled ill_data.json file, so the level
-// list is always current with no manual data update needed).
-constexpr const char* ILL_API_LEVELS_URL = "https://api.impossiblelevels.com/api/Levels/details";
-constexpr int ILL_API_PAGE_SIZE = 100;
-
-// Every successful live fetch is cached here (in the mod's own save
-// directory, not the read-only resources folder) so the list still works
-// offline, using whatever was last successfully downloaded.
-inline std::filesystem::path illCacheFilePath() {
-    return Mod::get()->getSaveDir() / "ill_data_cache.json";
-}
 
 // Helper function to extract EXACTLY 10 level IDs for the current page
 std::string getChunkedIDString(const std::vector<int>& ids, int pageIndex) {
@@ -44,173 +27,67 @@ std::string getChunkedIDString(const std::vector<int>& ids, int pageIndex) {
     return ss.str();
 }
 
-// Extracts a single level's numeric ID from one API entry, exactly like the
-// old file-based parser did (same JSON shape: entry.level.levelId).
-inline int extractLevelIdFromEntry(matjson::Value const& entry) {
-    int extractedID = 0;
-
-    if (entry.contains("level")) {
-        auto levelData = entry["level"];
-        if (levelData.contains("levelId") && !levelData["levelId"].isNull()) {
-            auto idField = levelData["levelId"];
-
-            if (idField.isString()) {
-                std::string idStr = idField.asString().unwrapOr("0");
-                if (!idStr.empty() && idStr != "0") {
-                    try {
-                        extractedID = std::stoi(idStr);
-                    } catch (...) {
-                        extractedID = 0;
-                    }
-                }
-            } else if (idField.isNumber()) {
-                extractedID = idField.asInt().unwrapOr(0);
-            }
-        }
-    }
-
-    return extractedID;
-}
-
-// Loads whatever was cached from the last successful live fetch, so the mod
-// has something to show immediately (including fully offline), before the
-// live refresh below has a chance to run or in case it fails.
-inline void loadILLDataFromCache() {
-    auto path = illCacheFilePath();
+// Function to load the JSON data on startup
+inline void loadILLData() {
+    g_illLevels.clear();
+    auto path = Mod::get()->getResourcesDir() / "ill_data.json";
+    
     auto res = utils::file::readString(path);
     if (!res) {
-        log::info("ILL Mod: No offline cache yet (first run, or never fetched successfully).");
+        log::error("ILL Mod: ill_data.json not found!");
         return;
     }
-
+    
     auto parsed = matjson::parse(res.unwrap());
     if (!parsed) {
-        log::error("ILL Mod: Offline cache file was corrupt, ignoring it.");
+        log::error("ILL Mod: Failed to parse JSON!");
         return;
     }
-
+    
     auto arrRes = parsed.unwrap().asArray();
     if (!arrRes) return;
-
-    g_illLevels.clear();
-    for (auto& entry : arrRes.unwrap()) {
-        int extractedID = extractLevelIdFromEntry(entry);
+    
+    auto arrayData = arrRes.unwrap();
+    
+    for (auto& entry : arrayData) {
+        int extractedID = 0;
+        
+        if (entry.contains("level")) {
+            auto levelData = entry["level"];
+            if (levelData.contains("levelId") && !levelData["levelId"].isNull()) {
+                auto idField = levelData["levelId"];
+                
+                if (idField.isString()) {
+                    std::string idStr = idField.asString().unwrapOr("0");
+                    if (!idStr.empty() && idStr != "0") {
+                        try {
+                            extractedID = std::stoi(idStr);
+                        } catch (...) {
+                            extractedID = 0;
+                        }
+                    }
+                } else if (idField.isNumber()) {
+                    extractedID = idField.asInt().unwrapOr(0);
+                }
+            }
+        }
+        
         if (extractedID > 0) {
             g_illLevels.push_back(extractedID);
         }
     }
-    log::info("ILL Mod: Loaded {} valid level IDs from offline cache.", g_illLevels.size());
+    log::info("ILL Mod: Successfully loaded {} valid level IDs", g_illLevels.size());
 }
 
-// Fetches every page of the live ILL list from the API (paginated the same
-// way ILL_data_grabber.py does it: page/pageSize params, stop on a partial
-// page). Only replaces the in-memory list and the offline cache once the
-// ENTIRE fetch has succeeded, so a failed refresh never wipes out data you
-// already had (from a previous fetch or the offline cache).
-Task<void> fetchAllILLLevelsAsync() {
-    g_illDataLoading = true;
-    g_illDataLoadFailed = false;
-
-    std::vector<int> fetchedLevels;
-    auto allEntriesRes = matjson::parse("[]");
-    auto allEntries = allEntriesRes.unwrap();
-
-    int page = 1;
-    while (true) {
-        auto req = web::WebRequest();
-        req.userAgent("Mozilla/5.0 (compatible; ILL-Viewer-GeodeMod/1.0)");
-        req.param("page", page);
-        req.param("pageSize", ILL_API_PAGE_SIZE);
-
-        auto res = co_await req.get(ILL_API_LEVELS_URL);
-
-        if (res.code() < 200 || res.code() >= 300) {
-            log::error("ILL Mod: API returned HTTP {} on page {}", res.code(), page);
-            g_illDataLoadFailed = true;
-            break;
-        }
-
-        auto jsonRes = res.json();
-        if (!jsonRes) {
-            log::error("ILL Mod: Failed to parse API response as JSON on page {}", page);
-            g_illDataLoadFailed = true;
-            break;
-        }
-
-        auto root = jsonRes.unwrap();
-        if (!root.contains("data")) {
-            log::error("ILL Mod: API response missing 'data' field on page {}", page);
-            g_illDataLoadFailed = true;
-            break;
-        }
-
-        auto arrRes = root["data"].asArray();
-        if (!arrRes) {
-            log::error("ILL Mod: 'data' field was not an array on page {}", page);
-            g_illDataLoadFailed = true;
-            break;
-        }
-
-        auto entries = arrRes.unwrap();
-        int countThisPage = static_cast<int>(entries.size());
-
-        for (auto& entry : entries) {
-            allEntries.push(entry);
-            int extractedID = extractLevelIdFromEntry(entry);
-            if (extractedID > 0) {
-                fetchedLevels.push_back(extractedID);
-            }
-        }
-
-        log::info("ILL Mod: Fetched page {} ({} entries, {} valid IDs so far)", page, countThisPage, fetchedLevels.size());
-
-        if (countThisPage < ILL_API_PAGE_SIZE) {
-            // Partial (or empty) page means we've reached the end of the list.
-            break;
-        }
-        page++;
-    }
-
-    if (!g_illDataLoadFailed) {
-        g_illLevels = std::move(fetchedLevels);
-
-        auto writeRes = utils::file::writeString(illCacheFilePath(), allEntries.dump(matjson::NO_INDENTATION));
-        if (!writeRes) {
-            log::error("ILL Mod: Failed to save offline cache (mod will still work online).");
-        } else {
-            log::info("ILL Mod: Saved offline cache with {} total entries.", g_illLevels.size());
-        }
-    } else {
-        log::error("ILL Mod: Live fetch failed, keeping previously loaded data ({} entries).", g_illLevels.size());
-    }
-
-    g_illDataLoading = false;
-    log::info("ILL Mod: Finished. {} total valid level IDs in memory.", g_illLevels.size());
-}
-
-void startILLFetch() {
-    if (g_illDataLoading) return;
-    async::spawn(fetchAllILLLevelsAsync(), [](auto) {});
-}
-
-// On mod load: show whatever's cached immediately (works offline), then
-// always try to refresh it live in the background.
+// Run JSON loader on mod load
 $on_mod(Loaded) {
-    loadILLDataFromCache();
-    startILLFetch();
+    loadILLData();
 }
 
 // Function to open the ILL viewer on the actively tracked page
 void openILLBrowser(bool isPush) {
     if (g_illLevels.empty()) {
-        if (g_illDataLoading) {
-            FLAlertLayer::create("Please Wait", "Still loading the ILL list from the server, try again in a moment.", "OK")->show();
-        } else if (g_illDataLoadFailed) {
-            FLAlertLayer::create("Error", "Couldn't load the ILL list (check your internet connection). Retrying now.", "OK")->show();
-            startILLFetch();
-        } else {
-            FLAlertLayer::create("Error", "No levels found.", "OK")->show();
-        }
+        FLAlertLayer::create("Error", "No levels found in JSON.", "OK")->show();
         return;
     }
 
