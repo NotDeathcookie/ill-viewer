@@ -7,7 +7,6 @@
 #include <string>
 #include <sstream>
 #include <algorithm>
-#include <filesystem>
 
 using namespace geode::prelude;
 
@@ -22,13 +21,6 @@ inline bool g_illDataLoadFailed = false;
 // list is always current with no manual data update needed).
 constexpr const char* ILL_API_LEVELS_URL = "https://api.impossiblelevels.com/api/Levels/details";
 constexpr int ILL_API_PAGE_SIZE = 100;
-
-// Every successful live fetch is cached here (in the mod's own save
-// directory, not the read-only resources folder) so the list still works
-// offline, using whatever was last successfully downloaded.
-inline std::filesystem::path illCacheFilePath() {
-    return Mod::get()->getSaveDir() / "ill_data_cache.json";
-}
 
 // Helper function to extract EXACTLY 10 level IDs for the current page
 std::string getChunkedIDString(const std::vector<int>& ids, int pageIndex) {
@@ -72,48 +64,15 @@ inline int extractLevelIdFromEntry(matjson::Value const& entry) {
     return extractedID;
 }
 
-// Loads whatever was cached from the last successful live fetch, so the mod
-// has something to show immediately (including fully offline), before the
-// live refresh below has a chance to run or in case it fails.
-inline void loadILLDataFromCache() {
-    auto path = illCacheFilePath();
-    auto res = utils::file::readString(path);
-    if (!res) {
-        log::info("ILL Mod: No offline cache yet (first run, or never fetched successfully).");
-        return;
-    }
-
-    auto parsed = matjson::parse(res.unwrap());
-    if (!parsed) {
-        log::error("ILL Mod: Offline cache file was corrupt, ignoring it.");
-        return;
-    }
-
-    auto arrRes = parsed.unwrap().asArray();
-    if (!arrRes) return;
-
-    g_illLevels.clear();
-    for (auto& entry : arrRes.unwrap()) {
-        int extractedID = extractLevelIdFromEntry(entry);
-        if (extractedID > 0) {
-            g_illLevels.push_back(extractedID);
-        }
-    }
-    log::info("ILL Mod: Loaded {} valid level IDs from offline cache.", g_illLevels.size());
-}
-
 // Fetches every page of the live ILL list from the API (paginated the same
 // way ILL_data_grabber.py does it: page/pageSize params, stop on a partial
-// page). Only replaces the in-memory list and the offline cache once the
-// ENTIRE fetch has succeeded, so a failed refresh never wipes out data you
-// already had (from a previous fetch or the offline cache).
+// page). Only replaces the in-memory list once the ENTIRE fetch has
+// succeeded, so a failed refresh never wipes out a previously loaded list.
 arc::Future<> fetchAllILLLevelsAsync() {
     g_illDataLoading = true;
     g_illDataLoadFailed = false;
 
     std::vector<int> fetchedLevels;
-    auto allEntriesRes = matjson::parse("[]");
-    auto allEntries = allEntriesRes.unwrap();
 
     int page = 1;
     while (true) {
@@ -155,7 +114,6 @@ arc::Future<> fetchAllILLLevelsAsync() {
         int countThisPage = static_cast<int>(entries.size());
 
         for (auto& entry : entries) {
-            allEntries.push(entry);
             int extractedID = extractLevelIdFromEntry(entry);
             if (extractedID > 0) {
                 fetchedLevels.push_back(extractedID);
@@ -173,13 +131,6 @@ arc::Future<> fetchAllILLLevelsAsync() {
 
     if (!g_illDataLoadFailed) {
         g_illLevels = std::move(fetchedLevels);
-
-        auto writeRes = utils::file::writeString(illCacheFilePath(), allEntries.dump(matjson::NO_INDENTATION));
-        if (!writeRes) {
-            log::error("ILL Mod: Failed to save offline cache (mod will still work online).");
-        } else {
-            log::info("ILL Mod: Saved offline cache with {} total entries.", g_illLevels.size());
-        }
     } else {
         log::error("ILL Mod: Live fetch failed, keeping previously loaded data ({} entries).", g_illLevels.size());
     }
@@ -193,10 +144,8 @@ void startILLFetch() {
     async::spawn(fetchAllILLLevelsAsync(), [] {});
 }
 
-// On mod load: show whatever's cached immediately (works offline), then
-// always try to refresh it live in the background.
+// Kick off the live fetch on mod load.
 $on_mod(Loaded) {
-    loadILLDataFromCache();
     startILLFetch();
 }
 
@@ -206,7 +155,7 @@ void openILLBrowser(bool isPush) {
         if (g_illDataLoading) {
             FLAlertLayer::create("Please Wait", "Still loading the ILL list from the server, try again in a moment.", "OK")->show();
         } else if (g_illDataLoadFailed) {
-            FLAlertLayer::create("Error", "Couldn't load the ILL list (check your internet connection). Retrying now.", "OK")->show();
+            FLAlertLayer::create("Error", "Couldn't load the ILL list (check your internet connection), retrying now.", "OK")->show();
             startILLFetch();
         } else {
             FLAlertLayer::create("Error", "No levels found.", "OK")->show();
