@@ -107,7 +107,7 @@ inline void loadILLDataFromCache() {
 // page). Only replaces the in-memory list and the offline cache once the
 // ENTIRE fetch has succeeded, so a failed refresh never wipes out data you
 // already had (from a previous fetch or the offline cache).
-Task<void> fetchAllILLLevelsAsync() {
+arc::Future<> fetchAllILLLevelsAsync() {
     g_illDataLoading = true;
     g_illDataLoadFailed = false;
 
