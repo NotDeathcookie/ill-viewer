@@ -190,7 +190,7 @@ arc::Future<> fetchAllILLLevelsAsync() {
 
 void startILLFetch() {
     if (g_illDataLoading) return;
-    async::spawn(fetchAllILLLevelsAsync(), [](auto) {});
+    async::spawn(fetchAllILLLevelsAsync(), [] {});
 }
 
 // On mod load: show whatever's cached immediately (works offline), then
