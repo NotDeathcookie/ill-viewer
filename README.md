@@ -1,34 +1,26 @@
 # ILL Viewer
 
-A Geode mod for Geometry Dash that lets you browse the Impossible Level List (ILL) without leaving the game.
+A Geode mod for Geometry Dash that adds an in-game viewer for the Impossible Level List (ILL), accessible as a blue "Extreme Demon" style button in the level search menu.
 
-## What it does
+## How it works
 
-- Adds a blue-tinted Extreme Demon button to the level search screen. Tap it to open the list.
-- Shows the ILL in pages of 10 levels, using the game's normal level browser.
-- Loads the full list (about 2,000 levels) from a bundled data file, so it works offline.
-- Comes with its own custom icon, so it looks right in your mods list.
+- On load, the mod fetches the current ILL list directly from the live API at `api.impossiblelevels.com`, paginating through every page until the full list is retrieved.
+- The fetch runs asynchronously in the background and refreshes automatically on every launch — there's no bundled data file to update manually.
+- Clicking the ILL button opens Geometry Dash's own level browser, filtered to exactly the levels on the list, 10 per page (matching GD's native pagination).
+- If the live fetch fails (e.g. no internet), the mod keeps whatever list it already had in memory rather than clearing it, and shows a clear in-game message.
 
-## Installing
+## Requirements
 
-1. Go to the [Releases page](../../releases) and download the latest `.geode` file for your operating system.
-2. Drop it into your Geometry Dash `geode/mods` folder, or install it with Geode.
-3. Launch the game. You can find the button on the level search screen.
+- An internet connection to fetch the list. Viewing the actual levels also requires internet, since Geometry Dash itself needs to contact its own servers to load level details for any search — this is true of the vanilla game and isn't something this mod can change.
 
-Built for Geometry Dash **2.2081** with Geode **5.11.2** (may work with other verisons).
+## Building locally
 
-## Level data
+```
+geode build
+```
 
-The list is already included in the mod. If you're curious where it comes from, the data grabber Python file is available in the [ILL Data Grabber repository](https://github.com/NotDeathcookie/impossible-level-list-data-grabber).
+Requires the Geode CLI and SDK installed, matching the `"geode"` version declared in `mod.json`.
 
-## Building it yourself
+## Building on GitHub
 
-With the Geode CLI and SDK installed:
-
-    geode build
-
-Or use GitHub. Every push runs `.github/workflows/build.yml`, which builds Windows and macOS versions using the official `geode-sdk/build-geode-mod` action. Build outputs show up in the Actions tab, and finished versions are published on the Releases page.
-
-## Credits
-
-Level data comes from the Impossible Level List.
+Pushing to any branch triggers `.github/workflows/build.yml`, which builds Windows and macOS binaries via the official `geode-sdk/build-geode-mod` action and uploads them as workflow artifacts. Tagged releases also attach the built `.geode` files directly for easy download.
