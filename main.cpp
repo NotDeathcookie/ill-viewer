@@ -1,14 +1,12 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/LevelSearchLayer.hpp>
 #include <Geode/modify/LevelBrowserLayer.hpp>
-#include <Geode/modify/LevelCell.hpp>
 #include <Geode/utils/web.hpp>
 #include <Geode/utils/async.hpp>
 #include <vector>
 #include <string>
 #include <sstream>
 #include <algorithm>
-#include <unordered_map>
 
 using namespace geode::prelude;
 
@@ -22,28 +20,7 @@ inline bool g_illDataLoadFailed = false;
 // Live ILL API (replaces the old bundled ill_data.json file, so the level
 // list is always current with no manual data update needed).
 constexpr const char* ILL_API_LEVELS_URL = "https://api.impossiblelevels.com/api/Levels/details";
-constexpr const char* ILL_API_TAGS_URL = "https://api.impossiblelevels.com/api/Tags";
-constexpr const char* ILL_API_TIERS_URL = "https://api.impossiblelevels.com/api/Tiers";
 constexpr int ILL_API_PAGE_SIZE = 100;
-
-// Extra per-level info for the badges shown on each level cell, looked up
-// by level ID. Populated alongside the main ID list during the live fetch.
-struct ILLLevelInfo {
-    std::string tier;              // e.g. "Top 10", "Legendary", from /api/Tiers by rank
-    std::vector<std::string> tags; // all tag names for this level, from /api/Tags
-    bool isNoNG = false;           // "No NG" isn't a tag, it's its own field on the level
-};
-inline std::unordered_map<int, ILLLevelInfo> g_illInfoByLevelId;
-
-// Only these tag names get drawn as badges (everything else from the API is
-// still fetched and stored, just not shown) -- edit this list freely to
-// change what shows up on a level cell.
-inline const std::vector<std::string> KEY_BADGE_TAGS = {
-    "2 Player",
-    "Memory",
-    "Tentative Placement",
-    "Epilepsy Warning",
-};
 
 // Helper function to extract EXACTLY 10 level IDs for the current page
 std::string getChunkedIDString(const std::vector<int>& ids, int pageIndex) {
@@ -87,157 +64,73 @@ inline int extractLevelIdFromEntry(matjson::Value const& entry) {
     return extractedID;
 }
 
-struct ILLTierRange {
-    int start = 0;
-    int end = 0;
-    std::string name;
-};
-
-inline std::string tierForRank(int rank, std::vector<ILLTierRange> const& tiers) {
-    for (auto& t : tiers) {
-        if (rank >= t.start && rank <= t.end) return t.name;
-    }
-    return "";
-}
-
 // Fetches every page of the live ILL list from the API (paginated the same
 // way ILL_data_grabber.py does it: page/pageSize params, stop on a partial
-// page), plus the tag and tier reference data needed to label each level.
-// Only replaces the in-memory data once the ENTIRE fetch has succeeded, so a
-// failed refresh never wipes out a previously loaded list.
+// page). Only replaces the in-memory list once the ENTIRE fetch has
+// succeeded, so a failed refresh never wipes out a previously loaded list.
 arc::Future<> fetchAllILLLevelsAsync() {
     g_illDataLoading = true;
     g_illDataLoadFailed = false;
 
-    // 1. Tag id -> name map.
-    std::unordered_map<int, std::string> tagNames;
-    {
-        auto req = web::WebRequest();
-        req.userAgent("Mozilla/5.0 (compatible; ILL-Viewer-GeodeMod/1.0)");
-        auto res = co_await req.get(ILL_API_TAGS_URL);
-        if (res.code() < 200 || res.code() >= 300) {
-            log::error("ILL Mod: API returned HTTP {} fetching tags", res.code());
-            g_illDataLoadFailed = true;
-        } else if (auto jsonRes = res.json(); jsonRes && jsonRes.unwrap().asArray()) {
-            for (auto& tag : jsonRes.unwrap().asArray().unwrap()) {
-                if (tag.contains("id") && tag.contains("name")) {
-                    tagNames[tag["id"].asInt().unwrapOr(0)] = tag["name"].asString().unwrapOr("");
-                }
-            }
-        } else {
-            log::error("ILL Mod: Failed to parse tags response");
-            g_illDataLoadFailed = true;
-        }
-    }
-
-    // 2. Tier rank brackets.
-    std::vector<ILLTierRange> tiers;
-    if (!g_illDataLoadFailed) {
-        auto req = web::WebRequest();
-        req.userAgent("Mozilla/5.0 (compatible; ILL-Viewer-GeodeMod/1.0)");
-        auto res = co_await req.get(ILL_API_TIERS_URL);
-        if (res.code() < 200 || res.code() >= 300) {
-            log::error("ILL Mod: API returned HTTP {} fetching tiers", res.code());
-            g_illDataLoadFailed = true;
-        } else if (auto jsonRes = res.json(); jsonRes && jsonRes.unwrap().asArray()) {
-            for (auto& t : jsonRes.unwrap().asArray().unwrap()) {
-                ILLTierRange range;
-                range.start = t.contains("start") ? t["start"].asInt().unwrapOr(0) : 0;
-                range.end = t.contains("end") ? t["end"].asInt().unwrapOr(999999) : 999999;
-                range.name = t.contains("name") ? t["name"].asString().unwrapOr("") : "";
-                tiers.push_back(range);
-            }
-        } else {
-            log::error("ILL Mod: Failed to parse tiers response");
-            g_illDataLoadFailed = true;
-        }
-    }
-
-    // 3. The level list itself, paginated.
     std::vector<int> fetchedLevels;
-    std::unordered_map<int, ILLLevelInfo> fetchedInfo;
 
-    if (!g_illDataLoadFailed) {
-        int page = 1;
-        while (true) {
-            auto req = web::WebRequest();
-            req.userAgent("Mozilla/5.0 (compatible; ILL-Viewer-GeodeMod/1.0)");
-            req.param("page", page);
-            req.param("pageSize", ILL_API_PAGE_SIZE);
+    int page = 1;
+    while (true) {
+        auto req = web::WebRequest();
+        req.userAgent("Mozilla/5.0 (compatible; ILL-Viewer-GeodeMod/1.0)");
+        req.param("page", page);
+        req.param("pageSize", ILL_API_PAGE_SIZE);
 
-            auto res = co_await req.get(ILL_API_LEVELS_URL);
+        auto res = co_await req.get(ILL_API_LEVELS_URL);
 
-            if (res.code() < 200 || res.code() >= 300) {
-                log::error("ILL Mod: API returned HTTP {} on page {}", res.code(), page);
-                g_illDataLoadFailed = true;
-                break;
-            }
-
-            auto jsonRes = res.json();
-            if (!jsonRes) {
-                log::error("ILL Mod: Failed to parse API response as JSON on page {}", page);
-                g_illDataLoadFailed = true;
-                break;
-            }
-
-            auto root = jsonRes.unwrap();
-            if (!root.contains("data")) {
-                log::error("ILL Mod: API response missing 'data' field on page {}", page);
-                g_illDataLoadFailed = true;
-                break;
-            }
-
-            auto arrRes = root["data"].asArray();
-            if (!arrRes) {
-                log::error("ILL Mod: 'data' field was not an array on page {}", page);
-                g_illDataLoadFailed = true;
-                break;
-            }
-
-            auto entries = arrRes.unwrap();
-            int countThisPage = static_cast<int>(entries.size());
-
-            for (auto& entry : entries) {
-                int extractedID = extractLevelIdFromEntry(entry);
-                if (extractedID <= 0) continue;
-
-                fetchedLevels.push_back(extractedID);
-
-                ILLLevelInfo info;
-                if (entry.contains("level")) {
-                    auto lv = entry["level"];
-                    int rank = lv.contains("rank") ? lv["rank"].asInt().unwrapOr(0) : 0;
-                    info.tier = tierForRank(rank, tiers);
-                    info.isNoNG = lv.contains("isNoNG") && lv["isNoNG"].isBool() && lv["isNoNG"].asBool().unwrapOr(false);
-                }
-                if (entry.contains("tagIds")) {
-                    auto tagIdsRes = entry["tagIds"].asArray();
-                    if (tagIdsRes) {
-                        for (auto& tagIdVal : tagIdsRes.unwrap()) {
-                            int tagId = tagIdVal.asInt().unwrapOr(-1);
-                            auto it = tagNames.find(tagId);
-                            if (it != tagNames.end()) {
-                                info.tags.push_back(it->second);
-                            }
-                        }
-                    }
-                }
-                fetchedInfo[extractedID] = std::move(info);
-            }
-
-            log::info("ILL Mod: Fetched page {} ({} entries, {} valid IDs so far)", page, countThisPage, fetchedLevels.size());
-
-            if (countThisPage < ILL_API_PAGE_SIZE) {
-                // Partial (or empty) page means we've reached the end of the list.
-                break;
-            }
-            page++;
+        if (res.code() < 200 || res.code() >= 300) {
+            log::error("ILL Mod: API returned HTTP {} on page {}", res.code(), page);
+            g_illDataLoadFailed = true;
+            break;
         }
+
+        auto jsonRes = res.json();
+        if (!jsonRes) {
+            log::error("ILL Mod: Failed to parse API response as JSON on page {}", page);
+            g_illDataLoadFailed = true;
+            break;
+        }
+
+        auto root = jsonRes.unwrap();
+        if (!root.contains("data")) {
+            log::error("ILL Mod: API response missing 'data' field on page {}", page);
+            g_illDataLoadFailed = true;
+            break;
+        }
+
+        auto arrRes = root["data"].asArray();
+        if (!arrRes) {
+            log::error("ILL Mod: 'data' field was not an array on page {}", page);
+            g_illDataLoadFailed = true;
+            break;
+        }
+
+        auto entries = arrRes.unwrap();
+        int countThisPage = static_cast<int>(entries.size());
+
+        for (auto& entry : entries) {
+            int extractedID = extractLevelIdFromEntry(entry);
+            if (extractedID > 0) {
+                fetchedLevels.push_back(extractedID);
+            }
+        }
+
+        log::info("ILL Mod: Fetched page {} ({} entries, {} valid IDs so far)", page, countThisPage, fetchedLevels.size());
+
+        if (countThisPage < ILL_API_PAGE_SIZE) {
+            // Partial (or empty) page means we've reached the end of the list.
+            break;
+        }
+        page++;
     }
 
     if (!g_illDataLoadFailed) {
         g_illLevels = std::move(fetchedLevels);
-        g_illInfoByLevelId = std::move(fetchedInfo);
     } else {
         log::error("ILL Mod: Live fetch failed, keeping previously loaded data ({} entries).", g_illLevels.size());
     }
@@ -387,49 +280,5 @@ class $modify(ILLLevelSearchLayer, LevelSearchLayer) {
     void onILLButton(CCObject*) {
         g_illPage = 0; // Reset tracker to page 1
         openILLBrowser(true);
-    }
-};
-
-// Hook LevelCell to draw small corner badges for tier + key tags, only when
-// we're inside an ILL search. These are compact text labels, not real icon
-// art -- swap the CCLabelBMFont::create calls below for sprites once you
-// have badge images you want to use instead.
-class $modify(ILLLevelCell, LevelCell) {
-    void loadFromLevel(GJGameLevel* level) {
-        LevelCell::loadFromLevel(level);
-
-        if (!g_isILLSearch || !level) return;
-
-        auto it = g_illInfoByLevelId.find(static_cast<int>(level->m_levelID));
-        if (it == g_illInfoByLevelId.end()) return;
-        auto& info = it->second;
-
-        std::vector<std::string> badgeTexts;
-        if (!info.tier.empty()) {
-            badgeTexts.push_back(info.tier);
-        }
-        for (auto& tag : info.tags) {
-            if (std::find(KEY_BADGE_TAGS.begin(), KEY_BADGE_TAGS.end(), tag) != KEY_BADGE_TAGS.end()) {
-                badgeTexts.push_back(tag);
-            }
-        }
-        if (info.isNoNG) {
-            badgeTexts.push_back("No NG");
-        }
-
-        if (badgeTexts.empty()) return;
-
-        auto size = this->getContentSize();
-        float yOffset = size.height - 12.f;
-
-        for (auto& text : badgeTexts) {
-            auto label = CCLabelBMFont::create(text.c_str(), "chatFont.fnt");
-            label->setScale(0.45f);
-            label->setAnchorPoint({1.f, 1.f});
-            label->setPosition({size.width - 6.f, yOffset});
-            label->setColor({255, 220, 90});
-            this->addChild(label, 100);
-            yOffset -= 12.f;
-        }
     }
 };
