@@ -118,19 +118,15 @@ arc::Future<> fetchAllILLLevelsAsync() {
         if (res.code() < 200 || res.code() >= 300) {
             log::error("ILL Mod: API returned HTTP {} fetching tags", res.code());
             g_illDataLoadFailed = true;
-        } else {
-            auto jsonRes = res.json();
-            auto arrRes = jsonRes ? jsonRes.unwrap().asArray() : Result<matjson::Value::Array>(geode::Err(""));
-            if (jsonRes && arrRes) {
-                for (auto& tag : arrRes.unwrap()) {
-                    if (tag.contains("id") && tag.contains("name")) {
-                        tagNames[tag["id"].asInt().unwrapOr(0)] = tag["name"].asString().unwrapOr("");
-                    }
+        } else if (auto jsonRes = res.json(); jsonRes && jsonRes.unwrap().asArray()) {
+            for (auto& tag : jsonRes.unwrap().asArray().unwrap()) {
+                if (tag.contains("id") && tag.contains("name")) {
+                    tagNames[tag["id"].asInt().unwrapOr(0)] = tag["name"].asString().unwrapOr("");
                 }
-            } else {
-                log::error("ILL Mod: Failed to parse tags response");
-                g_illDataLoadFailed = true;
             }
+        } else {
+            log::error("ILL Mod: Failed to parse tags response");
+            g_illDataLoadFailed = true;
         }
     }
 
@@ -143,21 +139,17 @@ arc::Future<> fetchAllILLLevelsAsync() {
         if (res.code() < 200 || res.code() >= 300) {
             log::error("ILL Mod: API returned HTTP {} fetching tiers", res.code());
             g_illDataLoadFailed = true;
-        } else {
-            auto jsonRes = res.json();
-            auto arrRes = jsonRes ? jsonRes.unwrap().asArray() : Result<matjson::Value::Array>(geode::Err(""));
-            if (jsonRes && arrRes) {
-                for (auto& t : arrRes.unwrap()) {
-                    ILLTierRange range;
-                    range.start = t.contains("start") ? t["start"].asInt().unwrapOr(0) : 0;
-                    range.end = t.contains("end") ? t["end"].asInt().unwrapOr(999999) : 999999;
-                    range.name = t.contains("name") ? t["name"].asString().unwrapOr("") : "";
-                    tiers.push_back(range);
-                }
-            } else {
-                log::error("ILL Mod: Failed to parse tiers response");
-                g_illDataLoadFailed = true;
+        } else if (auto jsonRes = res.json(); jsonRes && jsonRes.unwrap().asArray()) {
+            for (auto& t : jsonRes.unwrap().asArray().unwrap()) {
+                ILLTierRange range;
+                range.start = t.contains("start") ? t["start"].asInt().unwrapOr(0) : 0;
+                range.end = t.contains("end") ? t["end"].asInt().unwrapOr(999999) : 999999;
+                range.name = t.contains("name") ? t["name"].asString().unwrapOr("") : "";
+                tiers.push_back(range);
             }
+        } else {
+            log::error("ILL Mod: Failed to parse tiers response");
+            g_illDataLoadFailed = true;
         }
     }
 
