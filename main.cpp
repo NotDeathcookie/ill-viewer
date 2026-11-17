@@ -461,43 +461,65 @@ class $modify(ILLBrowserLayer, LevelBrowserLayer) {
         if (g_isILLSearch) {
             auto winSize = CCDirector::sharedDirector()->getWinSize();
 
-            // Smaller title, tucked at the very top, to make room for the search bar.
+            // Title stays at the top, just a bit smaller, with the search bar right below it.
             if (auto title = typeinfo_cast<CCLabelBMFont*>(this->getChildByID("title-label"))) {
                 title->setString("IMPOSSIBLE LEVEL LIST");
-                title->setScale(0.5f);
-                title->setPositionY(winSize.height - 11.f);
+                title->setScale(0.45f);
+                title->setPositionY(winSize.height - 9.f);
             }
 
-            // Search bar
-            auto input = TextInput::create(250.f, "Search ILL Levels...", "bigFont.fnt");
-            input->setID("ill-search-input"_spr);
-            input->setScale(0.8f);
-            input->setMaxCharCount(40);
-            input->setPosition({winSize.width / 2.f - 16.f, winSize.height - 31.f});
-            if (!g_illSearchQuery.empty()) {
-                input->setString(g_illSearchQuery);
+            // Where the level list sits (falls back to the standard centered 356x220 list).
+            CCPoint listPos = CCPoint{winSize.width / 2.f - 178.f, winSize.height / 2.f - 110.f};
+            CCSize listSize = CCSize{356.f, 220.f};
+            if (m_list) {
+                listPos = m_list->getPosition();
+                listSize = m_list->getContentSize();
             }
-            this->addChild(input, 10);
-            m_fields->illInput = input;
 
-            // Magnifier button (falls back to a plain "Go" button if the sprite is missing)
+            // Search bar: a brown 356x30 strip sitting on top of the list, same look
+            // as the Integrated Demonlist one (brown bar, dark input, green magnifier).
+            auto searchMenu = CCMenu::create();
+            searchMenu->setID("ill-search-bar"_spr);
+            searchMenu->setContentSize({356.f, 30.f});
+            searchMenu->setPosition({
+                listPos.x + (listSize.width - 356.f) / 2.f,
+                listPos.y + listSize.height + 2.f
+            });
+
+            auto barBackground = CCLayerColor::create({194, 114, 62, 255}, 356.f, 30.f);
+            barBackground->setID("ill-search-background"_spr);
+            searchMenu->addChild(barBackground);
+
             CCNode* btnSpr = CCSprite::createWithSpriteFrameName("gj_findBtn_001.png");
             if (!btnSpr) btnSpr = ButtonSprite::create("Go");
-            btnSpr->setScale(0.6f);
-
-            auto searchMenu = CCMenu::create();
-            searchMenu->setID("ill-search-menu"_spr);
-            searchMenu->setPosition({0.f, 0.f});
-
+            btnSpr->setScale(0.7f);
             auto searchBtn = CCMenuItemSpriteExtra::create(
                 btnSpr,
                 this,
                 menu_selector(ILLBrowserLayer::onILLSearch)
             );
             searchBtn->setID("ill-search-button"_spr);
-            searchBtn->setPosition({winSize.width / 2.f + 104.f, winSize.height - 31.f});
+            searchBtn->setPosition({337.f, 15.f});
             searchMenu->addChild(searchBtn);
-            this->addChild(searchMenu, 10);
+
+            auto input = TextInput::create(310.f, "Search ILL Levels...");
+            input->setID("ill-search-input"_spr);
+            input->setPosition({165.f, 15.f});
+            input->setTextAlign(TextInputAlign::Left);
+            input->setMaxCharCount(40);
+            auto inputNode = input->getInputNode();
+            inputNode->setLabelPlaceholderScale(0.4f);
+            inputNode->setMaxLabelScale(0.4f);
+            auto bgSprite = input->getBGSprite();
+            bgSprite->setContentSize({620.f, 40.f});
+            bgSprite->setScale(0.5f);
+            if (!g_illSearchQuery.empty()) {
+                input->setString(g_illSearchQuery);
+            }
+            searchMenu->addChild(input);
+            m_fields->illInput = input;
+
+            this->addChild(searchMenu, 20);
         }
         return true;
     }
